@@ -1,2 +1,2 @@
-chito freddy frazbear
-ar arr ar ar ar ar ar ar ar ar
+run :
+pip install -r requirements.txt
