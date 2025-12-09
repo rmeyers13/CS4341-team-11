@@ -1,7 +1,4 @@
 #this should let gpu acceleration run
-import cuml.accel
-cuml.accel.install()
-
 import pandas as pd
 import numpy as np
 from sklearn.metrics import make_scorer, matthews_corrcoef
@@ -12,6 +9,7 @@ from sklearn.svm import SVC
 from sklearn.neighbors import KNeighborsClassifier
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.preprocessing import KBinsDiscretizer
 from tabulate import tabulate
 
 def mcc_multioutput(y_true, y_pred):
@@ -66,56 +64,138 @@ def scaleData(dataset):
     }
     
     #Note that blowing sand is blowing sand or snow
-    weatherMap = {'Blowing sand':1, 'Clear':2, 'Clear/Blowing sand':1, 'Clear/Clear':2,
-                  'Clear/Cloudy':3, 'Clear/Fog':4, 'Clear/Other':2, 'Clear/Rain':5,
-                  'Clear/Reported but invalid':2, 'Clear/Severe crosswinds':6,
-                  'Clear/Sleet':7, 'Clear/Snow':8, 'Clear/Unknown':2, 'Cloudy':3,
-                  'Cloudy/Blowing sand':1, 'Cloudy/Clear':3, 'Cloudy/Cloudy':3,
-                  'Cloudy/Fog':4, 'Cloudy/Other':3, 'Cloudy/Rain':5,
-                  'Cloudy/Reported but invalid':3, 'Cloudy/Severe crosswinds':6,
-                  'Cloudy/Sleet':7, 'Cloudy/Snow':8, 'Cloudy/Unknown':3, 'Fog':4,
-                  'Not Reported':0, 'Other':0, 'Other/Blowing sand':1, 'Other/Clear':2,
-                  'Other/Cloudy':3, 'Other/Fog':4, 'Other/Other':0, 'Other/Rain':5,
-                  'Other/Severe crosswinds':6, 'Other/Sleet':7, 'Other/Snow':8,
-                  'Other/Unknown':0, 'Rain':4, 'Rain/Blowing sand':1, 'Rain/Clear':4,
-                  'Rain/Cloudy':4, 'Rain/Fog':4, 'Rain/Other':4, 'Rain/Rain':4,
-                  'Rain/Reported but invalid':4, 'Rain/Severe crosswinds':9,
-                  'Rain/Sleet':7, 'Rain/Snow':8, 'Rain/Unknown':4,
-                  'Reported but invalid':0, 'Reported but invalid/Reported but invalid':0,
-                  'Severe crosswinds':6, 'Severe crosswinds/Blowing sand':6,
-                  'Severe crosswinds/Clear':6, 'Severe crosswinds/Cloudy':6,
-                  'Severe crosswinds/Other':6, 'Severe crosswinds/Rain':9,
-                  'Severe crosswinds/Severe crosswinds':6,
-                  'Severe crosswinds/Sleet':10, 'Severe crosswinds/Snow':11,
-                  'Severe crosswinds/Unknown':6, 'Sleet':7, 'Snow':8,
-                  'Snow/Blowing sand':8, 'Snow/Clear':8, 'Snow/Cloudy':8,
-                  'Snow/Fog':8, 'Snow/Other':8, 'Snow/Rain':8,
-                  'Snow/Reported but invalid':8, 'Snow/Severe crosswinds':11,
-                  'Snow/Sleet':7, 'Snow/Snow':8, 'Snow/Unknown':8, 'Unknown':0,
-                  'Unknown/Blowing sand':1, 'Unknown/Clear':2, 'Unknown/Cloudy':3,
-                  'Unknown/Other':0, 'Unknown/Rain':4,
-                  'Unknown/Reported but invalid':0, 'Unknown/Sleet':7,
-                  'Unknown/Snow':8, 'Unknown/Unknown':0}
+    weatherMap = {'Blowing sand/snow':1,
+                  'Blowing sand/snow/Blowing sand/snow':1,
+                  'Blowing sand/snow/Clear':1,
+                  'Blowing sand/snow/Cloudy':1,
+                  'Blowing sand/snow/Fog/smog/smoke':1,
+                  'Blowing sand/snow/Other':1,
+                  'Blowing sand/snow/Rain':1,
+                  'Blowing sand/snow/Severe crosswinds':2,
+                  'Blowing sand/snow/Sleet/hail (freezing rain or drizzle)':1,
+                  'Blowing sand/snow/Snow':1,
+                  'Blowing sand/snow/Unknown':1,
+
+                  'Clear':3,
+                  'Clear/Blowing sand/snow':1,
+                  'Clear/Clear':3,
+                  'Clear/Cloudy':4,
+                  'Clear/Fog/smog/smoke':5,
+                  'Clear/Other':3,
+                  'Clear/Rain':6,
+                  'Clear/Reported but invalid':3,
+                  'Clear/Severe crosswinds':7,
+                  'Clear/Sleet/hail (freezing rain or drizzle)':8,
+                  'Clear/Snow':9,
+                  'Clear/Unknown':3,
+
+                  'Cloudy':4,
+                  'Cloudy/Blowing sand/snow':1,
+                  'Cloudy/Clear':4,
+                  'Cloudy/Cloudy':4,
+                  'Cloudy/Fog/smog/smoke':5,
+                  'Cloudy/Other':4,
+                  'Cloudy/Rain':6,
+                  'Cloudy/Reported but invalid':4,
+                  'Cloudy/Severe crosswinds':7,
+                  'Cloudy/Sleet/hail (freezing rain or drizzle)':8,
+                  'Cloudy/Snow':9,
+                  'Cloudy/Unknown':4,
+
+                  'Fog/smog/smoke':5,
+                  'Fog/smog/smoke/Clear':5,
+                  'Fog/smog/smoke/Cloudy':5,
+                  'Fog/smog/smoke/Fog/smog/smoke':5,
+                  'Fog/smog/smoke/Other':5,
+                  'Fog/smog/smoke/Rain':6,
+                  'Fog/smog/smoke/Sleet/hail (freezing rain or drizzle)':8,
+                  'Fog/smog/smoke/Snow':9,
+                  'Fog/smog/smoke/Unknown':5,
+
+                  'Not Reported':0,
+
+                  'Other':0,
+                  'Other/Blowing sand/snow':1,
+                  'Other/Clear':3,
+                  'Other/Cloudy':4,
+                  'Other/Fog/smog/smoke':5,
+                  'Other/Other':0,
+                  'Other/Rain':6,
+                  'Other/Severe crosswinds':7,
+                  'Other/Sleet/hail (freezing rain or drizzle)':8,
+                  'Other/Snow':9,
+                  'Other/Unknown':0,
+
+                  'Rain':6,
+                  'Rain/Blowing sand/snow':1,
+                  'Rain/Clear':6,
+                  'Rain/Cloudy':6,
+                  'Rain/Fog/smog/smoke':6,
+                  'Rain/Other':6,
+                  'Rain/Rain':6,
+                  'Rain/Reported but invalid':6,
+                  'Rain/Severe crosswinds':10,
+                  'Rain/Sleet/hail (freezing rain or drizzle)':8,
+                  'Rain/Snow':9,
+                  'Rain/Unknown':6,
+
+                  'Reported but invalid':0,
+                  'Reported but invalid/Reported but invalid':0,
+
+                  'Severe crosswinds':7,
+                  'Severe crosswinds/Blowing sand/snow':2,
+                  'Severe crosswinds/Clear':7,
+                  'Severe crosswinds/Cloudy':7,
+                  'Severe crosswinds/Other':7,
+                  'Severe crosswinds/Rain':10,
+                  'Severe crosswinds/Severe crosswinds':7,
+                  'Severe crosswinds/Snow':11,
+                  'Severe crosswinds/Unknown':7,
+
+                  'Sleet/hail (freezing rain or drizzle)':8,
+                  'Sleet/hail (freezing rain or drizzle)/Blowing sand/snow':8,
+                  'Sleet/hail (freezing rain or drizzle)/Clear':8,
+                  'Sleet/hail (freezing rain or drizzle)/Cloudy':8,
+                  'Sleet/hail (freezing rain or drizzle)/Fog/smog/smoke':8,
+                  'Sleet/hail (freezing rain or drizzle)/Other':8,
+                  'Sleet/hail (freezing rain or drizzle)/Rain':8,
+                  'Sleet/hail (freezing rain or drizzle)/Severe crosswinds':12,
+                  'Sleet/hail (freezing rain or drizzle)/Sleet/hail (freezing rain or drizzle)':8,
+                  'Sleet/hail (freezing rain or drizzle)/Snow':8,
+                  'Sleet/hail (freezing rain or drizzle)/Unknown':8,
+
+                  'Snow':9,
+                  'Snow/Blowing sand/snow':9,
+                  'Snow/Clear':9,
+                  'Snow/Cloudy':9,
+                  'Snow/Fog/smog/smoke':9,
+                  'Snow/Other':9,
+                  'Snow/Rain':9,
+                  'Snow/Reported but invalid':9,
+                  'Snow/Severe crosswinds':11,
+                  'Snow/Sleet/hail (freezing rain or drizzle)':9,
+                  'Snow/Snow':9,
+                  'Snow/Unknown':9,
+
+                  'Unknown':0,
+                  'Unknown/Blowing sand/snow':1,
+                  'Unknown/Clear':3,
+                  'Unknown/Cloudy':4,
+                  'Unknown/Other':0,
+                  'Unknown/Rain':6,
+                  'Unknown/Reported but invalid':0,
+                  'Unknown/Sleet/hail (freezing rain or drizzle)':8,
+                  'Unknown/Snow':9,
+                  'Unknown/Unknown':0
+    }
     
-    roadConditionMap = {' hail (freezing rain or drizzle)':1,
-                        ' hail (freezing rain or drizzle)/Blowing sand':2,
-                        ' hail (freezing rain or drizzle)/Clear':1,
-                        ' hail (freezing rain or drizzle)/Cloudy':1,
-                        ' hail (freezing rain or drizzle)/Fog':3,
-                        ' hail (freezing rain or drizzle)/Other':1,
-                        ' hail (freezing rain or drizzle)/Rain':4,
-                        ' hail (freezing rain or drizzle)/Severe crosswinds':5,
-                        ' hail (freezing rain or drizzle)/Sleet':6,
-                        ' hail (freezing rain or drizzle)/Snow':7,
-                        ' hail (freezing rain or drizzle)/Unknown':1,
-                        ' smog':8, ' snow':9, ' snow/Blowing sand':9, ' snow/Clear':9,
-                        ' snow/Cloudy':9, ' snow/Fog':9, ' snow/Other':9,
-                        ' snow/Rain':10, ' snow/Severe crosswinds':11,
-                        ' snow/Sleet':7, ' snow/Snow':9, ' snow/Unknown':9,
-                        'Dry':12, 'Ice':13, 'Not reported':0, 'Other':0,
-                        'Reported but invalid':0, 'Sand':14, 'Slush':15,
-                        'Snow':9, 'Unknown':0, 'Water (standing - moving)':16,
-                        'Wet':17}
+    roadConditionMap = {'Dry':1, 'Ice':2,
+                        'Not reported':0, 'Other':0,
+                        'Reported but invalid':0, 'Sand/mud/dirt/oil/gravel':3,
+                        'Slush':4, 'Snow':5,
+                        'Unknown':0, 'Water (standing - moving)':6,
+                        'Wet':7
+                        }
 
     #replacing the letters
     scaled_dataset = dataset.replace({
@@ -128,8 +208,24 @@ def scaleData(dataset):
         
 #Step 5 - Using RandomUnderSampler to create a balanced dataset of size 678
 def balanceDataset(scaled_dataset):
-    # y = 2 columns: Longitude, Latitude
-    dataset_results = scaled_dataset[["Longitude", "Latitude"]]
+    scaled_dataset = scaled_dataset[:10000]
+    # Take the continuous longitude/latitude
+    coords = scaled_dataset[["Longitude", "Latitude"]].to_numpy()
+
+    # Discretize them into, say, 10 bins each (tweak n_bins as you like)
+    discretizer = KBinsDiscretizer(
+        n_bins=10,          # number of bins per dimension
+        encode="ordinal",   # returns integers 0..n_bins-1
+        strategy="quantile" # each bin has roughly same number of samples
+    )
+
+    y_binned = discretizer.fit_transform(coords).astype(int)
+
+    # y now becomes integer class labels for each coordinate dimension
+    dataset_results = pd.DataFrame(
+        y_binned,
+        columns=["Longitude_bin", "Latitude_bin"]
+    )
     # X = all other columns
     dataset_balanced = scaled_dataset.drop(columns=["Longitude", "Latitude"])
     return dataset_balanced, dataset_results
