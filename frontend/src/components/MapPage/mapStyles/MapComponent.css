@@ -1,0 +1,19 @@
+.map-wrapper {
+    position: relative;
+}
+
+.map-info {
+    background: white;
+    padding: 12px 20px;
+    border-top: 1px solid #e0e0e0;
+    color: #333;
+    font-family: monospace;
+    font-size: 0.9rem;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.map-info p {
+    margin: 0;
+}
