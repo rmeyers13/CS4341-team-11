@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import MapComponent from './components/MapComponent';
-import SearchBar from './components/SearchBar';
+import MapComponent from './components/MapPage/MapComponent';
+import SearchBar from './components/MapPage/SearchBar';
 import './App.css';
 
 function App() {
