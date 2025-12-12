@@ -1,7 +1,10 @@
 {
     "cSpell.words": [
+        "arctan",
         "corrcoef",
         "Discretizer",
+        "dlat",
+        "dlon",
         "gini",
         "invscaling",
         "knnc",
