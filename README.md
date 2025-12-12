@@ -22,4 +22,4 @@ Run server.py
 Open the frontend folder and run:
     npm start
 
-*** DISCLAIMER: I was testing out my out model, we can switch to the original one instad of mlm_enhanced as needed as its not the most accurate ***
+*** DISCLAIMER: I was testing out my out model, we can switch to the original one instead of mlm_enhanced as needed as its not the most accurate ***

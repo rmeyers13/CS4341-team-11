@@ -94,10 +94,15 @@ def getDataset(filename):
 def scaleData(dataset):
     # Text to Number Map
     lightLevelMap = {
-        'Not reported': 0, 'Other': 0, 'Reported but invalid': 0, 'Unknown': 0,
-        'Dawn': 1, 'Dusk': 1,
+        'Not reported': 0,
+        'Other': 0,
+        'Reported but invalid': 0,
+        'Unknown': 0,
+        'Dawn': 1,
+        'Dusk': 1,
         'Daylight': 2,
-        'Dark - lighted roadway': 3, 'Dark - roadway not lighted': 3,
+        'Dark - lighted roadway': 3,
+        'Dark - roadway not lighted': 3,
         'Dark - unknown roadway lighting': 3
     }
 
@@ -504,7 +509,7 @@ def trainAndTest(X_train, X_test, y_train, y_test, tau=0.25):
         headers=["Model", "Best Params", f"Test loss (mean miles; tau={tau})"]
     ))
 
-    torch.save(best_model, "model_save_10000")
+    #torch.save(best_model, "model_save_10000")
 
 
     return {"PyTorch_custom_loss_only": test_score}
@@ -514,11 +519,12 @@ def main():
     filename = "allYears.csv"
     original_dataset = getDataset(filename)
     scaled_dataset = scaleData(original_dataset)
-    balanced_dataset, dataset_results = balanceDataset(scaled_dataset[:10000])
+    balanced_dataset, dataset_results = balanceDataset(scaled_dataset[:10])
 
     # Step 6 - Splitting the training and testing data
     X_train, X_test, y_train, y_test = train_test_split(balanced_dataset, dataset_results, test_size=0.2, random_state=42)
     trainAndTest(X_train, X_test, y_train, y_test)
+    print(X_test.to_numpy(dtype=np.float32))
 
 if __name__ == "__main__":
     main()
