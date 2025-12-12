@@ -1,6 +1,9 @@
 TO SETUP:
 
-In the backend folder run the command:
+In the main directory (CS4341-team-11) run:
+    npm install
+
+In the backend folder run:
     pip install -r requirements.txt
 
 In the frontend folder run:
