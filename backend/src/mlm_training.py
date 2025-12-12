@@ -1,4 +1,4 @@
-# this should let gpu acceleration run
+# Imports
 import pandas as pd
 import numpy as np
 from collections import defaultdict
@@ -10,7 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader, TensorDataset
 
-
+# This function gives the distance between two sets of coordinates in miles
 def haversine_distance(lat1, lon1, lat2, lon2):
     """
     Calculate distance between two points on the earth.
@@ -32,6 +32,7 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     distance = R * c
     return distance
 
+# This is a custom scoring function for evaluating a single generated point, comparing it to the list of points that are for that set of conditions
 def custom_score_one(x_vals, y_pred, binned_coords, tolerance_miles=0.5):
     """
     Score = distance (miles) from predicted coords to the nearest coord
@@ -39,6 +40,7 @@ def custom_score_one(x_vals, y_pred, binned_coords, tolerance_miles=0.5):
     If nearest distance <= tolerance, return 0.0.
     If bin is empty, return +inf (or you can choose another fallback).
     """
+    #this is the key, otherwise known as the set of conditions, for the array of binned coordinates
     key = (int(x_vals[0]), int(x_vals[1]), int(x_vals[2]))
     candidates = binned_coords.get(key, None)
 
@@ -64,6 +66,7 @@ def custom_score_one(x_vals, y_pred, binned_coords, tolerance_miles=0.5):
 
     return 0.0 if best <= tolerance_miles else best
 
+# This just takes an array of conditions and an array of predicted outcomes from running the model and compares them, generating a score
 def custom_score_batch(X_np, y_pred_np, binned_coords, tolerance_miles=0.5):
     # X_np: (N,3), y_pred_np: (N,2)
     scores = []
@@ -74,10 +77,7 @@ def custom_score_batch(X_np, y_pred_np, binned_coords, tolerance_miles=0.5):
 
     return float(np.mean(scores))
 
-# =====================
-#  Dataset / preprocessing
-# =====================
-
+# This functions get the data from the .csv and stores in using pandas as a dataframe
 def getDataset(filename):
     # defines the column names, and then defines the column names we want
     names = ["LightLevel", "Weather", "RoadCondition", "Longitude", "Latitude"]
@@ -91,8 +91,9 @@ def getDataset(filename):
     )
     return dataset
 
+# This function maps all text strings to integers to tran easier
 def scaleData(dataset):
-    # Text to Number Map
+    # Text to Number Maps
     lightLevelMap = {
         'Not reported': 0,
         'Other': 0,
@@ -254,7 +255,7 @@ def scaleData(dataset):
                         'Wet': 7
                         }
 
-    # replacing the letters
+    # Replacing the strings
     scaled_dataset = dataset.replace({
         'LightLevel': lightLevelMap,
         'Weather': weatherMap,
@@ -263,22 +264,17 @@ def scaleData(dataset):
 
     return scaled_dataset
 
+# This function splits the data set into conditions and coordinates
 def balanceDataset(scaled_dataset):
-    # y = continuous longitude / latitude
+    # y = longitude / latitude
     y = scaled_dataset[["Longitude", "Latitude"]]
 
-    # X = remaining features
+    # X = conditions
     X = scaled_dataset.drop(columns=["Longitude", "Latitude"])
 
     return X, y
 
-# =====================
-#  PyTorch model & training
-# =====================
-
-# ---------------------
-# Distance (Torch) - differentiable
-# ---------------------
+# Differentiable version of the custom scoring so the model can train with it
 def haversine_torch(lat1, lon1, lat2, lon2):
     """
     lat1, lon1: scalars or tensors
@@ -298,9 +294,7 @@ def haversine_torch(lat1, lon1, lat2, lon2):
     c = 2 * torch.atan2(torch.sqrt(a), torch.sqrt(1 - a))
     return R * c
 
-# ---------------------
-# Build bin -> candidate coords (ONCE, from training split)
-# ---------------------
+# This builds the bins for the coordinates, each set of conditions i.e. [0, 0, 0] is a key linked to an array of long and lat values that correspond to those conditions
 def build_binned_coords_torch(X_np, y_np, device):
     """
     X_np: (N, 3) float32 or similar with [LightLevel, Weather, RoadCondition]
@@ -317,9 +311,7 @@ def build_binned_coords_torch(X_np, y_np, device):
         out[k] = torch.tensor(coords, dtype=torch.float32, device=device)
     return out
 
-# ---------------------
-# Differentiable custom loss: soft-min haversine to candidates in the bin
-# ---------------------
+# This is the class for the loss tracking using the haversine_torch functions to tran the model
 class SoftBinHaversineLoss(nn.Module):
     def __init__(self, binned_coords, tau=0.25):
         """
@@ -337,7 +329,7 @@ class SoftBinHaversineLoss(nn.Module):
         """
         losses = []
 
-        # NOTE: bins are variable-length lists; easiest is loop per sample (still GPU for math)
+        # bins are variable-length lists, need to loop by range
         for i in range(preds_lonlat.size(0)):
             key = (
                 int(x_vals[i, 0].item()),
@@ -346,7 +338,7 @@ class SoftBinHaversineLoss(nn.Module):
             )
             candidates = self.bins.get(key, None)
             if candidates is None or candidates.numel() == 0:
-                continue  # if a bin is empty, just skip this sample
+                continue  # if a bin is empty, just skip this sample, this is a sanity check, it should never be triggered unless something goes wrong
 
             lon_p = preds_lonlat[i, 0]
             lat_p = preds_lonlat[i, 1]
@@ -368,9 +360,7 @@ class SoftBinHaversineLoss(nn.Module):
 
         return torch.stack(losses).mean()
 
-# =====================
-#  Model
-# =====================
+# This is the model class set up using pytorch
 class MultiOutputMLP(nn.Module):
     def __init__(self, input_dim, hidden_sizes=(100,)):
         super().__init__()
@@ -386,9 +376,7 @@ class MultiOutputMLP(nn.Module):
     def forward(self, x):
         return self.head(self.shared(x))
 
-# =====================
-#  Training / Eval using ONLY custom loss
-# =====================
+# This functions trains the model with the passed variables
 def train_one_model(
     X_train, y_train,
     X_val, y_val,
@@ -433,7 +421,8 @@ def train_one_model(
 
     return model, val_loss
 
-def evaluate_model(model, X_test, binned_coords, tau=0.25, device=None):
+# This evaluates the results from testing the model using the custom scoring
+def evaluate_model(model, X_test, binned_coords, device=None):
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -446,39 +435,40 @@ def evaluate_model(model, X_test, binned_coords, tau=0.25, device=None):
     preds_np = preds.detach().cpu().numpy()
     return custom_score_batch(X_test, preds_np, binned_coords)
 
+# This function trains and tests the model with several hyperparameter sets, saving the best model to a file for use in the main project
 def trainAndTest(X_train, X_test, y_train, y_test, tau=0.25):
+    # Converting the data to numpy arrays for use as tensors
     X_train_np = X_train.to_numpy(dtype=np.float32)
     y_train_np = y_train.to_numpy(dtype=np.float32)
     X_test_np  = X_test.to_numpy(dtype=np.float32)
-    y_test_np  = y_test.to_numpy(dtype=np.float32)
+    y_test_np = y_test.to_numpy(dtype=np.float32)
 
+    # Setting the settings for the model
     input_dim = X_train_np.shape[1]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Training on: {device}")
 
-    # validation split
-    X_tr, X_val, y_tr, y_val = train_test_split(
-        X_train_np, y_train_np, test_size=0.2, random_state=42
-    )
+    # Build bins
+    binned_coords = build_binned_coords_torch(X_train_np, y_train_np, device=device)
 
-    # Build bins from TRAINING split (X_tr/y_tr), on GPU
-    binned_coords = build_binned_coords_torch(X_tr, y_tr, device=device)
-
+    # These are the different paramets to test train with, more can be added, but I dont have the compute power for many more while maintaining a similar dataset size
     param_grid = [
         {"hidden_sizes": (50,),    "lr": 1e-3},
         {"hidden_sizes": (100,),   "lr": 1e-3},
         {"hidden_sizes": (50, 50), "lr": 5e-4},
     ]
 
+    # Declaring vars
     best_score = float("inf")
     best_params = None
     best_model = None
 
-    print("Step 6 - Training (PyTorch MLP) optimizing ONLY custom loss (soft-min haversine):")
+    # Testing the different hyper parameters
+    print("Training (PyTorch MLP) optimizing ONLY custom loss (soft-min haversine):")
     for params in param_grid:
         print(f"  Trying params: {params}")
         model, val_score = train_one_model(
-            X_tr, y_tr, X_val, y_val,
+            X_train_np, y_train_np, X_test_np, y_test_np,
             input_dim=input_dim,
             binned_coords=binned_coords,
             hidden_sizes=params["hidden_sizes"],
@@ -490,11 +480,13 @@ def trainAndTest(X_train, X_test, y_train, y_test, tau=0.25):
         )
         print(f"    Validation custom loss (mean miles, soft-min): {val_score:.4f}")
 
+        # Sets the best model based off of the scoring, lower the score the better
         if val_score < best_score:
             best_score = val_score
             best_params = params
             best_model = model
 
+    # Printing results
     print(tabulate(
         [["PyTorch MLP (custom loss only)", f"{best_params}", best_score]],
         headers=["Model", "Best Params", f"Val loss (mean miles; tau={tau})"]
@@ -503,28 +495,35 @@ def trainAndTest(X_train, X_test, y_train, y_test, tau=0.25):
     test_score = evaluate_model(best_model, X_test_np,
                                 binned_coords=binned_coords, tau=tau, device=device)
 
-    print("Step 7 - Testing Data Summary:")
+    print("Testing Data Summary:")
     print(tabulate(
         [["PyTorch MLP (custom loss only)", f"{best_params}", test_score]],
         headers=["Model", "Best Params", f"Test loss (mean miles; tau={tau})"]
     ))
 
-    #torch.save(best_model, "model_save_10000")
+    # Saves the best model
+    torch.save(best_model, "model_save")
 
 
     return {"PyTorch_custom_loss_only": test_score}
 
 def main():
+    # Nessicary to fix an error
     pd.set_option("future.no_silent_downcasting", True)
+
+    # .csv containing the data
     filename = "allYears.csv"
+
+    # Setting up the dataset
     original_dataset = getDataset(filename)
     scaled_dataset = scaleData(original_dataset)
+
+    # The index on scaled_dataset here truncates the results, removing the index and brackets would allow for training with the whole dataset, but requires more compute than I have
     balanced_dataset, dataset_results = balanceDataset(scaled_dataset[:10])
 
-    # Step 6 - Splitting the training and testing data
+    # Split the data 80/20 for training and testing, the run the training and testing
     X_train, X_test, y_train, y_test = train_test_split(balanced_dataset, dataset_results, test_size=0.2, random_state=42)
     trainAndTest(X_train, X_test, y_train, y_test)
-    print(X_test.to_numpy(dtype=np.float32))
 
 if __name__ == "__main__":
     main()
