@@ -149,6 +149,8 @@ def scaleData(dataset):
                   'Fog/smog/smoke/Sleet/hail (freezing rain or drizzle)': 8,
                   'Fog/smog/smoke/Snow': 9,
                   'Fog/smog/smoke/Unknown': 5,
+                  "Fog/smog/smoke/Blowing sand/snow": 1,
+                  "Fog/smog/smoke/Severe crosswinds": 13,
 
                   'Not Reported': 0,
 
@@ -179,6 +181,9 @@ def scaleData(dataset):
 
                   'Reported but invalid': 0,
                   'Reported but invalid/Reported but invalid': 0,
+                  "Reported but invalid/Clear": 3,
+                  "Reported but invalid/Cloudy": 4,
+                  "Reported but invalid/Rain": 6,
 
                   'Severe crosswinds': 7,
                   'Severe crosswinds/Blowing sand/snow': 2,
@@ -189,6 +194,8 @@ def scaleData(dataset):
                   'Severe crosswinds/Severe crosswinds': 7,
                   'Severe crosswinds/Snow': 11,
                   'Severe crosswinds/Unknown': 7,
+                  "Severe crosswinds/Fog/smog/smoke": 13,
+                  "Severe crosswinds/Sleet/hail (freezing rain or drizzle)": 12,
 
                   'Sleet/hail (freezing rain or drizzle)': 8,
                   'Sleet/hail (freezing rain or drizzle)/Blowing sand/snow': 8,
@@ -201,6 +208,7 @@ def scaleData(dataset):
                   'Sleet/hail (freezing rain or drizzle)/Sleet/hail (freezing rain or drizzle)': 8,
                   'Sleet/hail (freezing rain or drizzle)/Snow': 8,
                   'Sleet/hail (freezing rain or drizzle)/Unknown': 8,
+                  "Sleet/hail (freezing rain or drizzle)/Reported but invalid": 8,
 
                   'Snow': 9,
                   'Snow/Blowing sand/snow': 9,
@@ -224,14 +232,20 @@ def scaleData(dataset):
                   'Unknown/Reported but invalid': 0,
                   'Unknown/Sleet/hail (freezing rain or drizzle)': 8,
                   'Unknown/Snow': 9,
-                  'Unknown/Unknown': 0
+                  'Unknown/Unknown': 0,
+                  "Unknown/Severe crosswinds": 7
                   }
 
-    roadConditionMap = {'Dry': 1, 'Ice': 2,
-                        'Not reported': 0, 'Other': 0,
-                        'Reported but invalid': 0, 'Sand/mud/dirt/oil/gravel': 3,
-                        'Slush': 4, 'Snow': 5,
-                        'Unknown': 0, 'Water (standing - moving)': 6,
+    roadConditionMap = {'Dry': 1,
+                        'Ice': 2,
+                        'Not reported': 0,
+                        'Other': 0,
+                        'Reported but invalid': 0,
+                        'Sand/mud/dirt/oil/gravel': 3,
+                        'Slush': 4,
+                        'Snow': 5,
+                        'Unknown': 0,
+                        'Water (standing - moving)': 6,
                         'Wet': 7
                         }
 
@@ -490,16 +504,17 @@ def trainAndTest(X_train, X_test, y_train, y_test, tau=0.25):
         headers=["Model", "Best Params", f"Test loss (mean miles; tau={tau})"]
     ))
 
-    torch.save(best_model, "model_save")
+    torch.save(best_model, "model_save_10000")
 
 
     return {"PyTorch_custom_loss_only": test_score}
 
 def main():
+    pd.set_option("future.no_silent_downcasting", True)
     filename = "allYears.csv"
     original_dataset = getDataset(filename)
     scaled_dataset = scaleData(original_dataset)
-    balanced_dataset, dataset_results = balanceDataset(scaled_dataset[:100])
+    balanced_dataset, dataset_results = balanceDataset(scaled_dataset[:10000])
 
     # Step 6 - Splitting the training and testing data
     X_train, X_test, y_train, y_test = train_test_split(balanced_dataset, dataset_results, test_size=0.2, random_state=42)
