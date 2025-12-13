@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
 import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
 
@@ -15,7 +15,6 @@ function App() {
   });
   const [selectedArea, setSelectedArea] = useState(null);
   const [userLocation, setUserLocation] = useState({ lat: 42.3601, lng: -71.0589 });
-  const [map, setMap] = useState(null);
   const [predictionResult, setPredictionResult] = useState(null);
   const [isPredicting, setIsPredicting] = useState(false);
   const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false);
@@ -29,6 +28,9 @@ function App() {
     timeOfDay: '12:00',
     trafficDensity: 'Medium'
   });
+
+    const mapRef = useRef(null);
+    const [mapReady, setMapReady] = useState(false);
 
   // Use environment variables
   const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
@@ -251,23 +253,23 @@ function App() {
 
   // Handle map click to set location
   const onMapClick = useCallback((event) => {
-    if (!event || !event.latLng) return;
+  if (!event || !event.latLng) return;
 
-    const lat = event.latLng.lat();
-    const lng = event.latLng.lng();
+  const lat = event.latLng.lat();
+  const lng = event.latLng.lng();
 
-    setPredictionForm(prev => ({
-      ...prev,
-      latitude: lat,
-      longitude: lng
-    }));
+  setPredictionForm(prev => ({
+    ...prev,
+    latitude: lat,
+    longitude: lng
+  }));
 
-    // Fly to clicked location
-    if (map) {
-      map.panTo({ lat, lng });
-      map.setZoom(15);
-    }
-  }, [map]);
+  // Fly to clicked location
+    if (mapRef.current) {
+        mapRef.current.panTo({ lat, lng });
+        mapRef.current.setZoom(15);
+      }
+    }, []);
 
   // Handle form submission for prediction - FIXED VERSION
   const handlePredictRisk = async (e) => {
@@ -495,18 +497,25 @@ function App() {
                         mapTypeControl: true,
                         fullscreenControl: true
                       }}
-                      onLoad={(map) => setMap(map)}
+                      onLoad={(map) => {
+                      mapRef.current = map;
+                      // Small delay to ensure map is fully initialized
+                      setTimeout(() => {
+                        console.log('Map is now ready for markers');
+                        setMapReady(true);
+                      }, 100);
+                    }}
                       onClick={onMapClick}
                     >
                       {/* Risk area markers */}
-                      {riskAreas.map(area => (
-                        <Marker
-                          key={area.id}
-                          position={{ lat: area.latitude, lng: area.longitude }}
-                          icon={getMarkerIcon(area.riskLevel)}
-                          onClick={() => setSelectedArea(area)}
-                        />
-                      ))}
+                      {mapReady && riskAreas.map(area => (
+                      <Marker
+                        key={area.id}
+                        position={{ lat: area.latitude, lng: area.longitude }}
+                        icon={getMarkerIcon(area.riskLevel)}
+                        onClick={() => setSelectedArea(area)}
+                      />
+                         ))}
 
                       {/* Selected area info window */}
                       {selectedArea && (
@@ -548,9 +557,13 @@ function App() {
               )}
 
               <div className="mt-3 md:mt-4 text-center text-xs md:text-sm text-gray-500">
-                Click on markers for details • {riskAreas.length} areas monitored
-                {error && <span className="text-yellow-600 ml-1"> (Using fallback data)</span>}
-              </div>
+              {mapReady ? (
+                <>Click on markers for details • {riskAreas.length} areas monitored</>
+              ) : (
+                <>Loading map markers...</>
+              )}
+              {error && <span className="text-yellow-600 ml-1"> (Using fallback data)</span>}
+            </div>
             </div>
           </div>
         )}
