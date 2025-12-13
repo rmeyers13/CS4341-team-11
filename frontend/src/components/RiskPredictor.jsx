@@ -1,4 +1,3 @@
-// frontend/src/components/RiskPredictor.jsx
 import React, { useState } from 'react';
 
 const RiskPredictor = ({ onPredict }) => {

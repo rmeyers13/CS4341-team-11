@@ -1,4 +1,3 @@
-// frontend/src/components/RiskList.jsx
 import React from 'react';
 
 const RiskList = ({ riskAreas = [] }) => {

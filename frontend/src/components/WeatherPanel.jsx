@@ -1,4 +1,3 @@
-// frontend/src/components/WeatherPanel.jsx
 import React from 'react';
 
 const WeatherPanel = ({ data }) => {
