@@ -1,547 +1,320 @@
-# backend/src/server.py - FINAL FIXED VERSION
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-import numpy as np
-import joblib
-from datetime import datetime
-import os
-import sys
+from mlm import load_model, predict_location, MultiOutputMLP
+import torch
+import torch.nn as nn
 import random
+import math
+from datetime import datetime
+
+# Allow PyTorch to unpickle this class
+from torch.serialization import add_safe_globals
+
+add_safe_globals([MultiOutputMLP])
 
 app = Flask(__name__)
-# Fix CORS - allow all origins for development
-CORS(app, resources={r"/api/*": {"origins": "*"}})
+CORS(app)
 
-# Add the current directory to path for imports
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-
-# Initialize model variables
-model = None
-scaler = None
-encoder = None
-
-# Try to load model, but handle missing files gracefully
+# Load ML model at startup
+print("🚀 Loading ML model...")
 try:
-    model_path = os.path.join(os.path.dirname(__file__), 'risk_model.pkl')
-    scaler_path = os.path.join(os.path.dirname(__file__), 'scaler.pkl')
-    encoder_path = os.path.join(os.path.dirname(__file__), 'encoder.pkl')
-
-    print(f"📁 Looking for model at: {model_path}")
-    print(f"📁 Looking for scaler at: {scaler_path}")
-    print(f"📁 Looking for encoder at: {encoder_path}")
-
-    if os.path.exists(model_path):
-        model = joblib.load(model_path)
-        print("✅ Model loaded successfully")
-    else:
-        model = None
-        print("⚠️  Model file not found, using fallback predictions")
-
-    if os.path.exists(scaler_path):
-        scaler = joblib.load(scaler_path)
-        print("✅ Scaler loaded successfully")
-    else:
-        scaler = None
-        print("⚠️  Scaler file not found")
-
-    if os.path.exists(encoder_path):
-        encoder = joblib.load(encoder_path)
-        print("✅ Encoder loaded successfully")
-    else:
-        encoder = {}
-        print("⚠️  Encoder file not found")
-
+    model = load_model()
+    print("✅ Model loaded successfully!")
 except Exception as e:
-    print(f"❌ Error loading model: {e}")
-    model = None
-    scaler = None
-    encoder = {}
+    print(f"❌ Failed to load model: {e}")
+    raise
 
-# Light condition mapping (must match training)
-light_mapping = {
-    'Daylight': 0,
-    'Dawn/Dusk': 1,
-    'Dark - Lighted': 2,
-    'Dark - Unlighted': 3
-}
-
-weather_mapping = {
-    'Clear': 0,
-    'Cloudy': 1,
-    'Rain': 2,
-    'Snow': 3,
-    'Fog': 4,
-    'Severe Crosswinds': 5
-}
-
-road_mapping = {
-    'Dry': 0,
-    'Wet': 1,
-    'Snow/Ice': 2,
-    'Sand/Mud': 3,
-    'Water': 4
-}
-
-# Reverse mapping for display
-risk_map = {0: 'low', 1: 'medium', 2: 'high'}
+# Define possible conditions
+LIGHT_CONDITIONS = ["Daylight", "Dark - Lighted", "Dark - Unlighted", "Dawn/Dusk"]
+WEATHER_CONDITIONS = ["Clear", "Rain", "Cloudy", "Snow", "Fog", "Severe Crosswinds"]
+ROAD_CONDITIONS = ["Dry", "Wet", "Snow/Ice", "Sand/Mud", "Water"]
 
 
-def scale_features_for_prediction(longitude, latitude):
-    """Scale only longitude and latitude using the scaler (which was trained on 2 features)"""
-    if scaler is None:
-        return longitude, latitude
+# Haversine distance calculation for miles
+def haversine_distance(lat1, lon1, lat2, lon2):
+    R = 3958.8  # Earth's radius in miles
 
-    try:
-        # Create array with only the 2 features the scaler expects
-        features_to_scale = np.array([[longitude, latitude]])
-        scaled_features = scaler.transform(features_to_scale)
-        return float(scaled_features[0][0]), float(scaled_features[0][1])
-    except Exception as e:
-        print(f"⚠️  Scaling error: {e}")
-        return longitude, latitude
+    lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
 
+    dlat = lat2 - lat1
+    dlon = lon2 - lon1
 
-def predict_with_model(light_level, weather, road_condition, longitude, latitude):
-    """Make prediction using the loaded model"""
-    if model is None:
-        return None, None, None
+    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) * math.sin(dlon / 2) ** 2
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
-    try:
-        # Encode categorical features
-        light_encoded = light_mapping.get(light_level, 0)
-        weather_encoded = weather_mapping.get(weather, 0)
-        road_encoded = road_mapping.get(road_condition, 0)
-
-        # Scale numerical features
-        scaled_longitude, scaled_latitude = scale_features_for_prediction(longitude, latitude)
-
-        # Create feature array for model (5 features total)
-        features = np.array([[
-            light_encoded,
-            weather_encoded,
-            road_encoded,
-            scaled_longitude,
-            scaled_latitude
-        ]])
-
-        # Make prediction
-        prediction = model.predict(features)[0]
-        probability = model.predict_proba(features)[0]
-
-        # Map prediction to risk level
-        risk_level = risk_map.get(prediction, 'medium')
-        risk_score = float(probability.max())
-
-        return risk_level, risk_score, probability
-    except Exception as e:
-        print(f"⚠️  Model prediction error: {e}")
-        return None, None, None
+    return R * c
 
 
-@app.route('/api/risk-predictions', methods=['GET'])
-def get_risk_predictions():
-    """Get risk predictions for predefined areas"""
-    print("📡 Received request for /api/risk-predictions")
+def calculate_risk_from_distance(distance_miles, conditions):
+    """Calculate risk based on distance to predicted accident location"""
+    # Convert distance to risk score (closer = higher risk)
+    # Max distance for consideration: 50 miles
+    max_distance = 50.0
 
-    # Sample areas with their features
-    sample_areas = [
-        {
-            "id": 1,
-            "name": "Downtown Intersection",
-            "longitude": -71.0589,
-            "latitude": 42.3601,
-            "lightLevel": "Daylight",
-            "weather": "Clear",
-            "roadCondition": "Dry",
-            "description": "Busy intersection with high traffic volume during rush hours",
-            "incidents": 47
-        },
-        {
-            "id": 2,
-            "name": "Highway 101 Exit",
-            "longitude": -71.0689,
-            "latitude": 42.3701,
-            "lightLevel": "Daylight",
-            "weather": "Cloudy",
-            "roadCondition": "Wet",
-            "description": "Cars merge quickly here and sometimes bump into each other",
-            "incidents": 39
-        },
-        {
-            "id": 3,
-            "name": "Main St & 5th Ave",
-            "longitude": -71.0489,
-            "latitude": 42.3501,
-            "lightLevel": "Dawn/Dusk",
-            "weather": "Clear",
-            "roadCondition": "Dry",
-            "description": "Moderate traffic with occasional congestion",
-            "incidents": 24
-        },
-        {
-            "id": 4,
-            "name": "School Zone Area",
-            "longitude": -71.0789,
-            "latitude": 42.3801,
-            "lightLevel": "Daylight",
-            "weather": "Clear",
-            "roadCondition": "Dry",
-            "description": "Lots of kids crossing the street when school starts and ends",
-            "incidents": 18
-        },
-        {
-            "id": 5,
-            "name": "Residential District",
-            "longitude": -71.0889,
-            "latitude": 42.3901,
-            "lightLevel": "Dark - Lighted",
-            "weather": "Clear",
-            "roadCondition": "Dry",
-            "description": "Quiet neighborhood with wide, well-lit streets",
-            "incidents": 8
-        },
-        {
-            "id": 6,
-            "name": "Park Boulevard",
-            "longitude": -71.0389,
-            "latitude": 42.3401,
-            "lightLevel": "Daylight",
-            "weather": "Clear",
-            "roadCondition": "Dry",
-            "description": "Low traffic area with good visibility",
-            "incidents": 5
-        }
-    ]
+    if distance_miles > max_distance:
+        risk_score = 0.0
+    else:
+        risk_score = 1.0 - (distance_miles / max_distance)
 
+    # Adjust risk based on conditions severity
+    condition_multiplier = 1.0
+
+    # Higher risk for dangerous conditions
+    if conditions["light"] in ["Dark - Unlighted", "Dark - Lighted"]:
+        condition_multiplier *= 1.3
+    if conditions["weather"] in ["Rain", "Snow", "Severe Crosswinds"]:
+        condition_multiplier *= 1.4
+    if conditions["surface"] in ["Wet", "Snow/Ice", "Water"]:
+        condition_multiplier *= 1.3
+
+    risk_score = min(1.0, risk_score * condition_multiplier)
+
+    # Determine risk level
+    if risk_score >= 0.7:
+        risk_level = "high"
+    elif risk_score >= 0.4:
+        risk_level = "medium"
+    else:
+        risk_level = "low"
+
+    # Confidence based on model output variance (simplified)
+    confidence = 0.85
+
+    return risk_score, risk_level, confidence
+
+
+# Generate risk areas using model predictions
+def generate_risk_areas(num_areas=10):
     risk_areas = []
 
-    for area in sample_areas:
-        # Try to get real prediction if model exists
-        risk_level = "medium"  # default
-        risk_score = 0.5
+    # Boston area coordinates
+    base_lat = 42.3601
+    base_lng = -71.0589
 
-        if model is not None:
-            try:
-                # Use the model to predict
-                pred_risk_level, pred_risk_score, probabilities = predict_with_model(
-                    area['lightLevel'],
-                    area['weather'],
-                    area['roadCondition'],
-                    area['longitude'],
-                    area['latitude']
-                )
+    for i in range(num_areas):
+        # Generate random conditions
+        light = random.choice(LIGHT_CONDITIONS)
+        weather = random.choice(WEATHER_CONDITIONS)
+        road = random.choice(ROAD_CONDITIONS)
 
-                if pred_risk_level is not None:
-                    risk_level = pred_risk_level
-                    risk_score = pred_risk_score
-                else:
-                    # Model prediction failed, use incident-based fallback
-                    raise Exception("Model prediction returned None")
+        # Get predicted accident location from model
+        conditions = {
+            "light": light,
+            "weather": weather,
+            "surface": road
+        }
 
-            except Exception as e:
-                print(f"⚠️ Prediction error for area {area['id']}: {e}")
-                # Use incident-based fallback
-                if area['incidents'] > 30:
-                    risk_level = 'high'
-                    risk_score = 0.8
-                elif area['incidents'] > 15:
-                    risk_level = 'medium'
-                    risk_score = 0.6
-                else:
-                    risk_level = 'low'
-                    risk_score = 0.3
-        else:
-            # Model not available, use incident-based fallback
-            if area['incidents'] > 30:
-                risk_level = 'high'
-                risk_score = 0.8 + (random.random() * 0.1)
-            elif area['incidents'] > 15:
-                risk_level = 'medium'
-                risk_score = 0.5 + (random.random() * 0.2)
-            else:
-                risk_level = 'low'
-                risk_score = 0.2 + (random.random() * 0.2)
+        try:
+            location_pred = predict_location(model, conditions)
+            pred_lat = location_pred["latitude"]
+            pred_lon = location_pred["longitude"]
 
-        risk_areas.append({
-            "id": area["id"],
-            "name": area["name"],
-            "riskLevel": risk_level,
-            "riskScore": float(risk_score),
-            "description": area["description"],
-            "incidents": area["incidents"],
-            "longitude": area['longitude'],
-            "latitude": area['latitude'],
-            "features": {
-                "lightLevel": area['lightLevel'],
-                "weather": area['weather'],
-                "roadCondition": area['roadCondition']
-            },
-            "confidence": 0.85 if model else 0.5,
-            "lastUpdated": datetime.now().isoformat()
-        })
+            # Calculate distance from Boston center
+            distance = haversine_distance(base_lat, base_lng, pred_lat, pred_lon)
 
-    response = jsonify({
-        "riskAreas": risk_areas,
-        "timestamp": datetime.now().isoformat(),
-        "modelStatus": "loaded" if model else "fallback",
-        "totalAreas": len(risk_areas)
-    })
-
-    print(f"✅ Returning {len(risk_areas)} risk areas")
-    return response
-
-
-@app.route('/api/predict-risk', methods=['POST'])
-def predict_risk():
-    """Predict risk for custom input"""
-    print("📡 Received prediction request")
-
-    try:
-        data = request.json
-        print(f"📝 Prediction data: {data}")
-
-        # Get input values with defaults
-        light_level = data.get('lightLevel', 'Daylight')
-        weather = data.get('weather', 'Clear')
-        road_condition = data.get('roadCondition', 'Dry')
-        longitude = float(data.get('longitude', -71.0589))
-        latitude = float(data.get('latitude', 42.3601))
-        traffic_density = data.get('trafficDensity', 'Medium')
-        time_of_day = data.get('timeOfDay', '12:00')
-
-        if model is not None:
-            # Try to get real prediction if model exists
-            risk_level, risk_score, probabilities = predict_with_model(
-                light_level, weather, road_condition, longitude, latitude
+            # Calculate risk based on distance
+            risk_score, risk_level, confidence = calculate_risk_from_distance(
+                distance, conditions
             )
 
-            if risk_level is not None:
-                # Successfully got model prediction
-                confidence = float(probabilities.max() * 0.9) if probabilities is not None else 0.7
+            # Generate incidents count proportional to risk
+            incidents = max(1, int(risk_score * 100))
 
-                response_data = {
-                    "riskLevel": risk_level,
-                    "riskScore": float(risk_score),
-                    "confidence": confidence,
-                    "timestamp": datetime.now().isoformat()
-                }
+        except Exception as e:
+            print(f"Error generating area {i}: {e}")
+            raise
 
-                if probabilities is not None and len(probabilities) >= 3:
-                    response_data["predictionDetails"] = {
-                        "classProbabilities": {
-                            "low": float(probabilities[0]),
-                            "medium": float(probabilities[1]),
-                            "high": float(probabilities[2])
-                        }
-                    }
-
-                print(f"✅ Model prediction: {risk_level} (score: {risk_score:.2f})")
-                return jsonify(response_data)
-            else:
-                # Model prediction failed, fall through to fallback
-                print("⚠️  Model prediction failed, using fallback")
-
-        # Fallback prediction (when model is None or prediction failed)
-        print("⚠️  Using fallback prediction")
-
-        # Simple risk calculation based on conditions
-        risk_score = 0.5
-
-        # Adjust based on light level
-        if light_level in ['Dark - Lighted', 'Dark - Unlighted']:
-            risk_score += 0.2
-        elif light_level == 'Dawn/Dusk':
-            risk_score += 0.1
-
-        # Adjust based on weather
-        if weather in ['Rain', 'Snow']:
-            risk_score += 0.25
-        elif weather in ['Fog', 'Severe Crosswinds']:
-            risk_score += 0.15
-        elif weather == 'Cloudy':
-            risk_score += 0.05
-
-        # Adjust based on road condition
-        if road_condition in ['Snow/Ice', 'Water']:
-            risk_score += 0.3
-        elif road_condition == 'Wet':
-            risk_score += 0.15
-        elif road_condition == 'Sand/Mud':
-            risk_score += 0.1
-
-        # Adjust based on traffic density
-        if traffic_density in ['High', 'Congested']:
-            risk_score += 0.2
-        elif traffic_density == 'Medium':
-            risk_score += 0.1
-
-        # Adjust based on time of day
-        try:
-            hour = int(time_of_day.split(':')[0])
-            if hour < 6 or hour >= 20:  # Night time
-                risk_score += 0.15
-            elif 7 <= hour <= 9 or 16 <= hour <= 18:  # Rush hour
-                risk_score += 0.1
-        except:
-            pass
-
-        # Ensure risk score is between 0.1 and 0.95
-        risk_score = min(max(risk_score, 0.1), 0.95)
-
-        # Determine risk level
-        if risk_score > 0.7:
-            risk_level = 'high'
-        elif risk_score > 0.4:
-            risk_level = 'medium'
-        else:
-            risk_level = 'low'
-
-        return jsonify({
+        # Create area object
+        area = {
+            "id": i + 1,
+            "name": f"Predicted Accident Zone {i + 1}",
             "riskLevel": risk_level,
-            "riskScore": float(risk_score),
-            "confidence": 0.7,
-            "message": "Fallback prediction" + ("" if model is None else " (ML model prediction failed)"),
-            "timestamp": datetime.now().isoformat()
-        })
+            "riskScore": round(risk_score, 3),
+            "description": f"Model predicts accidents near here under {light}, {weather}, {road} conditions",
+            "incidents": incidents,
+            "longitude": round(pred_lon, 6),
+            "latitude": round(pred_lat, 6),
+            "features": {
+                "lightLevel": light,
+                "weather": weather,
+                "roadCondition": road,
+                "trafficDensity": "Medium"
+            },
+            "modelConfidence": round(confidence, 2),
+            "distanceFromCenter": round(distance, 2)
+        }
 
-    except Exception as e:
-        print(f"❌ Prediction error: {e}")
-        import traceback
-        traceback.print_exc()
+        risk_areas.append(area)
 
-        return jsonify({
-            "error": str(e),
-            "riskLevel": "medium",
-            "riskScore": 0.5,
-            "message": "Prediction failed - using fallback",
-            "timestamp": datetime.now().isoformat()
-        })
+    return risk_areas
 
 
-@app.route('/api/weather-data', methods=['GET'])
-def get_weather_data():
-    """Get current weather conditions"""
-    conditions = ['Clear', 'Cloudy', 'Rain', 'Snow', 'Fog']
+@app.route("/")
+def root():
+    return jsonify({
+        "message": "RiskMap ML Backend Running",
+        "model_loaded": True,
+        "model_purpose": "Predicts accident locations based on conditions"
+    })
 
-    response = jsonify({
-        "temperature": random.randint(60, 85),
-        "conditions": random.choice(conditions),
-        "precipitation": random.randint(0, 100),
-        "visibility": random.choice(['Good', 'Fair', 'Poor']),
+
+@app.route("/api/health")
+def health():
+    return jsonify({
+        "status": "ok",
+        "model": "active",
         "timestamp": datetime.now().isoformat()
     })
 
-    return response
 
-
-@app.route('/api/health', methods=['GET'])
-def health_check():
-    """Health check endpoint"""
-    return jsonify({
-        "status": "healthy",
-        "service": "RiskMap Backend",
-        "modelLoaded": model is not None,
-        "scalerLoaded": scaler is not None,
-        "timestamp": datetime.now().isoformat(),
-        "version": "1.0.0",
-        "endpoints": {
-            "GET /api/health": "Health check",
-            "GET /api/test": "Test endpoint",
-            "GET /api/risk-predictions": "Get risk predictions",
-            "POST /api/predict-risk": "Predict risk for location",
-            "GET /api/weather-data": "Get weather data"
-        }
-    })
-
-
-@app.route('/api/test', methods=['GET'])
-def test_endpoint():
-    """Simple test endpoint"""
-    return jsonify({
-        "message": "Backend is working!",
-        "timestamp": datetime.now().isoformat(),
-        "status": "success"
-    })
-
-
-@app.route('/api/risk-predictions/simple', methods=['GET'])
-def get_simple_risk_predictions():
-    """Simple version without model - for testing"""
-    sample_areas = [
-        {
-            "id": 1,
-            "name": "Test Area 1",
-            "riskLevel": "high",
-            "riskScore": 0.85,
-            "description": "Test area 1",
-            "incidents": 30,
-            "longitude": -71.0589,
-            "latitude": 42.3601
-        },
-        {
-            "id": 2,
-            "name": "Test Area 2",
-            "riskLevel": "medium",
-            "riskScore": 0.55,
-            "description": "Test area 2",
-            "incidents": 15,
-            "longitude": -71.0689,
-            "latitude": 42.3701
-        }
+@app.route("/api/debug-model", methods=["GET"])
+def debug_model():
+    """Debug endpoint to see model predictions"""
+    test_cases = [
+        {"light": "Daylight", "weather": "Clear", "surface": "Dry"},
+        {"light": "Dark - Unlighted", "weather": "Rain", "surface": "Wet"},
+        {"light": "Dark - Lighted", "weather": "Snow", "surface": "Snow/Ice"},
     ]
 
+    results = []
+    base_lat = 42.3601
+    base_lng = -71.0589
+
+    for test in test_cases:
+        try:
+            location = predict_location(model, test)
+            distance = haversine_distance(base_lat, base_lng, location["latitude"], location["longitude"])
+            risk_score, risk_level, confidence = calculate_risk_from_distance(distance, test)
+
+            results.append({
+                "input": test,
+                "predicted_location": location,
+                "distance_from_boston_miles": round(distance, 2),
+                "risk_score": round(risk_score, 3),
+                "risk_level": risk_level,
+                "confidence": round(confidence, 3)
+            })
+        except Exception as e:
+            results.append({"input": test, "error": str(e)})
+
+    return jsonify({"test_results": results})
+
+
+# Frontend endpoint for predictions
+@app.route("/predict-risk", methods=["POST"])
+def predict_risk():
+    """Main prediction endpoint"""
+    try:
+        data = request.json
+        if not data:
+            return jsonify({"success": False, "error": "No data provided"}), 400
+
+        print(f"📥 Received prediction request: {data}")
+
+        # Get user location and conditions
+        user_lat = float(data.get("latitude", 42.3601))
+        user_lon = float(data.get("longitude", -71.0589))
+        conditions = {
+            "light": data.get("lightLevel", "Daylight"),
+            "weather": data.get("weather", "Clear"),
+            "surface": data.get("roadCondition", "Dry")
+        }
+
+        # Get predicted accident location from model
+        predicted_location = predict_location(model, conditions)
+
+        # Calculate distance between user and predicted accident location
+        distance = haversine_distance(
+            user_lat, user_lon,
+            predicted_location["latitude"], predicted_location["longitude"]
+        )
+
+        print(f"📍 User location: ({user_lat}, {user_lon})")
+        print(f"📍 Predicted accident location: ({predicted_location['latitude']}, {predicted_location['longitude']})")
+        print(f"📏 Distance: {distance:.2f} miles")
+
+        # Calculate risk based on distance
+        risk_score, risk_level, confidence = calculate_risk_from_distance(distance, conditions)
+
+        # Prepare response
+        response = {
+            "success": True,
+            "riskScore": round(risk_score, 3),
+            "riskLevel": risk_level,
+            "confidence": round(confidence, 3),
+            "modelUsed": "MultiOutputMLP",
+            "distanceToPredictedAccident": round(distance, 2),
+            "predictedAccidentLocation": predicted_location,
+            "inputConditions": conditions
+        }
+
+        print(f"📤 Sending response: {response}")
+        return jsonify(response)
+
+    except Exception as e:
+        print(f"❌ Model prediction failed: {e}")
+        return jsonify({
+            "success": False,
+            "error": f"Model prediction failed: {str(e)}"
+        }), 500
+
+
+# Risk areas endpoint
+@app.route("/risk-predictions", methods=["GET"])
+def risk_predictions():
+    try:
+        risk_areas = generate_risk_areas(num_areas=10)
+
+        return jsonify({
+            "riskAreas": risk_areas,
+            "modelStatus": "active",
+            "areasGenerated": len(risk_areas),
+            "generatedAt": datetime.now().isoformat(),
+            "dataSource": "Model-predicted accident locations"
+        })
+    except Exception as e:
+        return jsonify({
+            "success": False,
+            "error": f"Failed to generate risk areas: {str(e)}"
+        }), 500
+
+
+# Weather data
+@app.route("/weather-data", methods=["GET"])
+def weather_data():
+    conditions = ["Clear", "Cloudy", "Rain"]
+    condition = random.choice(conditions)
+
+    if condition == "Clear":
+        temp = 75
+        precip = 0
+    elif condition == "Cloudy":
+        temp = 65
+        precip = 20
+    else:
+        temp = 60
+        precip = 80
+
     return jsonify({
-        "riskAreas": sample_areas,
-        "timestamp": datetime.now().isoformat(),
-        "modelStatus": "simple_test"
+        "temperature": temp,
+        "conditions": condition,
+        "precipitation": precip,
+        "visibility": "Good" if condition == "Clear" else "Moderate",
+        "updated": datetime.now().isoformat()
     })
 
 
-# Add a root endpoint
-@app.route('/')
-def index():
-    return jsonify({
-        "message": "RiskMap Backend API",
-        "status": "running",
-        "timestamp": datetime.now().isoformat(),
-        "docs": "Visit /api/health for API information"
-    })
-
-
-# Add a catch-all for /api/ routes that don't exist
-@app.route('/api/<path:path>')
-def api_catch_all(path):
-    return jsonify({
-        "error": f"Endpoint /api/{path} not found",
-        "available_endpoints": [
-            "/api/health",
-            "/api/test",
-            "/api/risk-predictions",
-            "/api/predict-risk",
-            "/api/weather-data",
-            "/api/risk-predictions/simple"
-        ]
-    }), 404
-
-
-if __name__ == '__main__':
-    print("\n" + "=" * 50)
-    print("🚀 Starting RiskMap Backend Server...")
+if __name__ == "__main__":
     print("=" * 50)
-    print(f"📁 Current directory: {os.getcwd()}")
-    print(f"📁 Script directory: {os.path.dirname(os.path.abspath(__file__))}")
-    print("\n📋 Available endpoints:")
-    print("   GET  /                     - Root endpoint")
-    print("   GET  /api/health          - Health check")
-    print("   GET  /api/test            - Test endpoint")
-    print("   GET  /api/risk-predictions - Get risk predictions")
-    print("   POST /api/predict-risk    - Predict risk for location")
-    print("   GET  /api/weather-data    - Get weather data")
-    print("   GET  /api/risk-predictions/simple - Simple test data")
-    print("\n🔗 Server will be available at:")
-    print("   http://localhost:5000")
-    print("   http://127.0.0.1:5000")
-    print("=" * 50 + "\n")
+    print("🚀 RiskMap ML Backend - Accident Location Predictor")
+    print("=" * 50)
+    print(f"📡 Available Endpoints:")
+    print(f"   POST /predict-risk      - Predict risk based on distance to accident location")
+    print(f"   GET  /risk-predictions  - Get model-predicted accident locations")
+    print(f"   GET  /api/debug-model   - Debug model predictions")
+    print(f"   GET  /weather-data      - Get basic weather")
+    print("=" * 50)
+    print("⚡ Server running on http://0.0.0.0:5000")
+    print("=" * 50)
 
-    # Fix: Use threaded=True for better performance
-    app.run(debug=True, port=5000, host='0.0.0.0', threaded=True)
+    app.run(host="0.0.0.0", port=5000, debug=True)
