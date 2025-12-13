@@ -76,11 +76,11 @@ def load_model():
     if not os.path.exists(model_path):
         raise FileNotFoundError(f"Model file not found at {model_path}")
 
-    print("📁 Loading model...")
+    print("Loading model...")
     model = torch.load(model_path, map_location="cpu", weights_only=False)
     model.eval()
 
-    print(f"✅ Model loaded successfully")
+    print(f"Model loaded successfully")
     print(f"   Model structure: {model}")
 
     return model
