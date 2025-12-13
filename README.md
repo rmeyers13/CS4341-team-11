@@ -1,3 +1,8 @@
+# Video Link:
+
+https://drive.google.com/file/d/1WHOhzXTq94YlONTGqHE6CweUrA543da0/view?usp=drive_link
+
+
 TO SETUP:
 
 In the main directory (CS4341-team-11) run:
@@ -11,11 +16,11 @@ In the frontend folder run:
 
 Set up .env file in the frontend directory with the following keys:
     REACT_APP_GOOGLE_MAPS_API_KEY= PUT YOUR KEY HERE!!!!!
-    REACT_APP_BACKEND_URL=http://localhost:5000/api
+    REACT_APP_BACKEND_URL=http://localhost:5000
 
 TO RUN:
 
-Run the mlm_enhanced.py to run the model
+Run the mlm.py to run the model
 
 Run server.py
 
