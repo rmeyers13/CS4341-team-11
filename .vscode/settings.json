@@ -1,6 +1,7 @@
 {
     "cSpell.words": [
         "arctan",
+        "broadcastable",
         "corrcoef",
         "Discretizer",
         "dlat",
@@ -12,7 +13,9 @@
         "liblinear",
         "mccs",
         "MLNN",
-        "multioutput"
+        "multioutput",
+        "Nessicary",
+        "preds"
     ],
     "python-envs.defaultEnvManager": "ms-python.python:conda",
     "python-envs.defaultPackageManager": "ms-python.python:conda",
