@@ -314,12 +314,21 @@ function App() {
 
   // Handle form input changes
   const handleInputChange = (e) => {
-    const { name, value } = e.target;
+  const { name, value } = e.target;
+
+  // Convert latitude and longitude to numbers, keep others as strings
+  if (name === 'latitude' || name === 'longitude') {
+    setPredictionForm(prev => ({
+      ...prev,
+      [name]: parseFloat(value) || 0
+    }));
+  } else {
     setPredictionForm(prev => ({
       ...prev,
       [name]: value
     }));
-  };
+  }
+};
 
   // Test backend connection
   const testBackendConnection = async () => {
@@ -818,15 +827,15 @@ function App() {
                             <div className="pt-3 md:pt-4 border-t border-gray-200">
                               <h4 className="font-medium text-gray-700 mb-2">Location Details</h4>
                               <div className="grid grid-cols-2 gap-2 text-sm">
-                                <div className="bg-gray-50 p-2 rounded">
-                                  <div className="text-gray-500">Latitude</div>
-                                  <div>{predictionForm.latitude.toFixed(6)}</div>
+                                  <div className="bg-gray-50 p-2 rounded">
+                                    <div className="text-gray-500">Latitude</div>
+                                    <div>{Number(predictionForm.latitude).toFixed(6)}</div>
+                                  </div>
+                                  <div className="bg-gray-50 p-2 rounded">
+                                    <div className="text-gray-500">Longitude</div>
+                                    <div>{Number(predictionForm.longitude).toFixed(6)}</div>
+                                  </div>
                                 </div>
-                                <div className="bg-gray-50 p-2 rounded">
-                                  <div className="text-gray-500">Longitude</div>
-                                  <div>{predictionForm.longitude.toFixed(6)}</div>
-                                </div>
-                              </div>
                             </div>
 
                             <div className="pt-3 md:pt-4 border-t border-gray-200">
