@@ -7,7 +7,7 @@ import random
 import math
 from datetime import datetime
 
-# Allow PyTorch to unpickle this class
+# Enable PyTorch to load custom class from pickle
 from torch.serialization import add_safe_globals
 
 add_safe_globals([MultiOutputMLP])
@@ -15,25 +15,25 @@ add_safe_globals([MultiOutputMLP])
 app = Flask(__name__)
 CORS(app)
 
-# Load ML model at startup
-print("🚀 Loading ML model...")
+# Load trained ML model at server startup
+print("Loading ML model...")
 try:
     model = load_model()
-    print("✅ Model loaded successfully!")
+    print("Model loaded successfully!")
 except Exception as e:
-    print(f"❌ Failed to load model: {e}")
+    print(f"Failed to load model: {e}")
     raise
 
-# Define possible conditions
+# Available environmental condition options
 LIGHT_CONDITIONS = ["Daylight", "Dark - Lighted", "Dark - Unlighted", "Dawn/Dusk"]
 WEATHER_CONDITIONS = ["Clear", "Rain", "Cloudy", "Snow", "Fog", "Severe Crosswinds"]
 ROAD_CONDITIONS = ["Dry", "Wet", "Snow/Ice", "Sand/Mud", "Water"]
 
 
-# Haversine distance calculation for miles
+# Calculate great-circle distance between two geographic points
 def haversine_distance(lat1, lon1, lat2, lon2):
-    R = 3958.8  # Earth's radius in miles
-
+    """Returns distance in miles using Earth's radius of 3958.8 miles"""
+    R = 3958.8
     lat1, lon1, lat2, lon2 = map(math.radians, [lat1, lon1, lat2, lon2])
 
     dlat = lat2 - lat1
@@ -45,10 +45,9 @@ def haversine_distance(lat1, lon1, lat2, lon2):
     return R * c
 
 
+# Convert distance to risk score with condition modifiers
 def calculate_risk_from_distance(distance_miles, conditions):
-    """Calculate risk based on distance to predicted accident location"""
-    # Convert distance to risk score (closer = higher risk)
-    # Max distance for consideration: 50 miles
+    """Computes risk score from distance and environmental factors"""
     max_distance = 50.0
 
     if distance_miles > max_distance:
@@ -56,10 +55,9 @@ def calculate_risk_from_distance(distance_miles, conditions):
     else:
         risk_score = 1.0 - (distance_miles / max_distance)
 
-    # Adjust risk based on conditions severity
     condition_multiplier = 1.0
 
-    # Higher risk for dangerous conditions
+    # Increase risk for hazardous conditions
     if conditions["light"] in ["Dark - Unlighted", "Dark - Lighted"]:
         condition_multiplier *= 1.3
     if conditions["weather"] in ["Rain", "Snow", "Severe Crosswinds"]:
@@ -69,7 +67,7 @@ def calculate_risk_from_distance(distance_miles, conditions):
 
     risk_score = min(1.0, risk_score * condition_multiplier)
 
-    # Determine risk level
+    # Categorize risk level
     if risk_score >= 0.7:
         risk_level = "high"
     elif risk_score >= 0.4:
@@ -77,54 +75,48 @@ def calculate_risk_from_distance(distance_miles, conditions):
     else:
         risk_level = "low"
 
-    # Confidence based on model output variance (simplified)
-    confidence = 0.85
+    confidence = 0.85  # Placeholder confidence value
 
     return risk_score, risk_level, confidence
 
 
-# Generate risk areas using model predictions
+# Generate simulated risk zones based on model predictions
 def generate_risk_areas(num_areas=10):
+    """Creates risk assessment zones using model predictions"""
     risk_areas = []
 
-    # Boston area coordinates
+    # Boston coordinates as reference point
     base_lat = 42.3601
     base_lng = -71.0589
 
     for i in range(num_areas):
-        # Generate random conditions
+        # Random environmental conditions
         light = random.choice(LIGHT_CONDITIONS)
         weather = random.choice(WEATHER_CONDITIONS)
         road = random.choice(ROAD_CONDITIONS)
 
-        # Get predicted accident location from model
-        conditions = {
-            "light": light,
-            "weather": weather,
-            "surface": road
-        }
+        conditions = {"light": light, "weather": weather, "surface": road}
 
         try:
+            # Get model prediction for accident location
             location_pred = predict_location(model, conditions)
             pred_lat = location_pred["latitude"]
             pred_lon = location_pred["longitude"]
 
-            # Calculate distance from Boston center
+            # Calculate distance from reference point
             distance = haversine_distance(base_lat, base_lng, pred_lat, pred_lon)
 
-            # Calculate risk based on distance
-            risk_score, risk_level, confidence = calculate_risk_from_distance(
-                distance, conditions
-            )
+            # Compute risk metrics
+            risk_score, risk_level, confidence = calculate_risk_from_distance(distance, conditions)
 
-            # Generate incidents count proportional to risk
+            # Estimate incident count
             incidents = max(1, int(risk_score * 100))
 
         except Exception as e:
             print(f"Error generating area {i}: {e}")
             raise
 
-        # Create area object
+        # Construct risk zone object
         area = {
             "id": i + 1,
             "name": f"Predicted Accident Zone {i + 1}",
@@ -149,6 +141,7 @@ def generate_risk_areas(num_areas=10):
     return risk_areas
 
 
+# Root endpoint for server status
 @app.route("/")
 def root():
     return jsonify({
@@ -158,6 +151,7 @@ def root():
     })
 
 
+# Health check endpoint
 @app.route("/api/health")
 def health():
     return jsonify({
@@ -167,9 +161,10 @@ def health():
     })
 
 
+# Diagnostic endpoint for model testing
 @app.route("/api/debug-model", methods=["GET"])
 def debug_model():
-    """Debug endpoint to see model predictions"""
+    """Tests model with predefined condition sets"""
     test_cases = [
         {"light": "Daylight", "weather": "Clear", "surface": "Dry"},
         {"light": "Dark - Unlighted", "weather": "Rain", "surface": "Wet"},
@@ -200,18 +195,16 @@ def debug_model():
     return jsonify({"test_results": results})
 
 
-# Frontend endpoint for predictions
+# Main prediction endpoint for frontend requests
 @app.route("/predict-risk", methods=["POST"])
 def predict_risk():
-    """Main prediction endpoint"""
+    """Calculates accident risk based on user location and conditions"""
     try:
         data = request.json
         if not data:
             return jsonify({"success": False, "error": "No data provided"}), 400
 
-        print(f"📥 Received prediction request: {data}")
-
-        # Get user location and conditions
+        # Extract user location and conditions
         user_lat = float(data.get("latitude", 42.3601))
         user_lon = float(data.get("longitude", -71.0589))
         conditions = {
@@ -220,23 +213,19 @@ def predict_risk():
             "surface": data.get("roadCondition", "Dry")
         }
 
-        # Get predicted accident location from model
+        # Get model prediction
         predicted_location = predict_location(model, conditions)
 
-        # Calculate distance between user and predicted accident location
+        # Calculate distance to predicted accident location
         distance = haversine_distance(
             user_lat, user_lon,
             predicted_location["latitude"], predicted_location["longitude"]
         )
 
-        print(f"📍 User location: ({user_lat}, {user_lon})")
-        print(f"📍 Predicted accident location: ({predicted_location['latitude']}, {predicted_location['longitude']})")
-        print(f"📏 Distance: {distance:.2f} miles")
-
-        # Calculate risk based on distance
+        # Compute risk metrics
         risk_score, risk_level, confidence = calculate_risk_from_distance(distance, conditions)
 
-        # Prepare response
+        # Construct response
         response = {
             "success": True,
             "riskScore": round(risk_score, 3),
@@ -248,20 +237,19 @@ def predict_risk():
             "inputConditions": conditions
         }
 
-        print(f"📤 Sending response: {response}")
         return jsonify(response)
 
     except Exception as e:
-        print(f"❌ Model prediction failed: {e}")
         return jsonify({
             "success": False,
             "error": f"Model prediction failed: {str(e)}"
         }), 500
 
 
-# Risk areas endpoint
+# Endpoint for simulated risk zone generation
 @app.route("/risk-predictions", methods=["GET"])
 def risk_predictions():
+    """Returns collection of model-predicted risk zones"""
     try:
         risk_areas = generate_risk_areas(num_areas=10)
 
@@ -279,9 +267,10 @@ def risk_predictions():
         }), 500
 
 
-# Weather data
+# Simple weather simulation endpoint
 @app.route("/weather-data", methods=["GET"])
 def weather_data():
+    """Returns simulated weather data for frontend display"""
     conditions = ["Clear", "Cloudy", "Rain"]
     condition = random.choice(conditions)
 
@@ -304,17 +293,14 @@ def weather_data():
     })
 
 
+# Server startup
 if __name__ == "__main__":
-    print("=" * 50)
-    print("🚀 RiskMap ML Backend - Accident Location Predictor")
-    print("=" * 50)
-    print(f"📡 Available Endpoints:")
-    print(f"   POST /predict-risk      - Predict risk based on distance to accident location")
-    print(f"   GET  /risk-predictions  - Get model-predicted accident locations")
-    print(f"   GET  /api/debug-model   - Debug model predictions")
-    print(f"   GET  /weather-data      - Get basic weather")
-    print("=" * 50)
-    print("⚡ Server running on http://0.0.0.0:5000")
-    print("=" * 50)
+    print("RiskMap ML Backend - Accident Location Predictor")
+    print("Available Endpoints:")
+    print("   POST /predict-risk      - Predict risk based on distance to accident location")
+    print("   GET  /risk-predictions  - Get model-predicted accident locations")
+    print("   GET  /api/debug-model   - Debug model predictions")
+    print("   GET  /weather-data      - Get basic weather")
+    print("Server running on http://0.0.0.0:5000")
 
     app.run(host="0.0.0.0", port=5000, debug=True)
