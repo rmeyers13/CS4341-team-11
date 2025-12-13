@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import './App.css';
-import { GoogleMap, LoadScript, Marker, InfoWindow } from '@react-google-maps/api';
+import { GoogleMap, Marker, InfoWindow, useLoadScript } from '@react-google-maps/api';
 
 function App() {
   const [activeTab, setActiveTab] = useState('map');
@@ -17,8 +17,7 @@ function App() {
   const [userLocation, setUserLocation] = useState({ lat: 42.3601, lng: -71.0589 });
   const [predictionResult, setPredictionResult] = useState(null);
   const [isPredicting, setIsPredicting] = useState(false);
-  const [isGoogleMapsLoaded, setIsGoogleMapsLoaded] = useState(false);
-  const [mapError, setMapError] = useState(null);
+  const [mapReady, setMapReady] = useState(false);
   const [predictionForm, setPredictionForm] = useState({
     lightLevel: 'Daylight',
     weather: 'Clear',
@@ -29,14 +28,16 @@ function App() {
     trafficDensity: 'Medium'
   });
 
-    const mapRef = useRef(null);
-    const [mapReady, setMapReady] = useState(false);
+  const mapRef = useRef(null);
 
-  // Use environment variables
   const API_BASE_URL = process.env.REACT_APP_BACKEND_URL || 'http://localhost:5000';
   const GOOGLE_MAPS_API_KEY = process.env.REACT_APP_GOOGLE_MAPS_API_KEY;
 
-  // Options for dropdowns
+  const { isLoaded, loadError } = useLoadScript({
+    googleMapsApiKey: GOOGLE_MAPS_API_KEY,
+    libraries: ['places']
+  });
+
   const lightLevelOptions = [
     { value: 'Daylight', label: 'Daylight' },
     { value: 'Dawn/Dusk', label: 'Dawn/Dusk' },
@@ -68,17 +69,14 @@ function App() {
     { value: 'Congested', label: 'Congested' }
   ];
 
-  // Map configuration
   const mapContainerStyle = {
     width: '100%',
     height: '500px'
   };
 
-  // Fetch risk areas from backend
   useEffect(() => {
     fetchData();
 
-    // Get user's current location if available
     if (navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
@@ -102,7 +100,6 @@ function App() {
       setLoading(true);
       setError(null);
 
-      // Fetch risk predictions
       const riskResponse = await fetch(`${API_BASE_URL}/risk-predictions`);
       if (!riskResponse.ok) {
         throw new Error(`HTTP error! status: ${riskResponse.status}`);
@@ -110,7 +107,6 @@ function App() {
       const riskData = await riskResponse.json();
       setRiskAreas(riskData.riskAreas || []);
 
-      // Fetch weather data
       const weatherResponse = await fetch(`${API_BASE_URL}/weather-data`);
       if (weatherResponse.ok) {
         const weatherData = await weatherResponse.json();
@@ -121,7 +117,6 @@ function App() {
       console.error('Error fetching data:', error);
       setError(`Failed to connect to backend: ${error.message}`);
 
-      // Fallback to sample data if backend is down
       const sampleRiskAreas = getSampleRiskAreas();
       setRiskAreas(sampleRiskAreas);
     } finally {
@@ -129,7 +124,6 @@ function App() {
     }
   };
 
-  // Sample data for fallback
   const getSampleRiskAreas = () => {
     return [
       {
@@ -211,7 +205,6 @@ function App() {
     ];
   };
 
-  // Get color based on risk level
   const getRiskColor = (riskLevel) => {
     switch(riskLevel) {
       case 'high': return '#ef4444';
@@ -221,7 +214,6 @@ function App() {
     }
   };
 
-  // Get marker icon URL based on risk level
   const getMarkerIcon = (riskLevel) => {
   const color = getRiskColor(riskLevel);
 
@@ -239,19 +231,6 @@ function App() {
   };
 };
 
-  // Handle Google Maps load
-  const handleGoogleMapsLoad = useCallback(() => {
-    setIsGoogleMapsLoaded(true);
-    setMapError(null);
-  }, []);
-
-  const handleGoogleMapsError = useCallback((error) => {
-    console.error('Google Maps failed to load:', error);
-    setMapError('Failed to load Google Maps. Please check your API key and internet connection.');
-    setIsGoogleMapsLoaded(false);
-  }, []);
-
-  // Handle map click to set location
   const onMapClick = useCallback((event) => {
   if (!event || !event.latLng) return;
 
@@ -264,14 +243,12 @@ function App() {
     longitude: lng
   }));
 
-  // Fly to clicked location
     if (mapRef.current) {
         mapRef.current.panTo({ lat, lng });
         mapRef.current.setZoom(15);
       }
     }, []);
 
-  // Handle form submission for prediction - FIXED VERSION
   const handlePredictRisk = async (e) => {
     e.preventDefault();
     setIsPredicting(true);
@@ -294,7 +271,6 @@ function App() {
       const data = await response.json();
       setPredictionResult(data);
 
-      // Update user location to prediction location
       setUserLocation({
         lat: predictionForm.latitude,
         lng: predictionForm.longitude
@@ -312,11 +288,9 @@ function App() {
     }
   };
 
-  // Handle form input changes
   const handleInputChange = (e) => {
   const { name, value } = e.target;
 
-  // Convert latitude and longitude to numbers, keep others as strings
   if (name === 'latitude' || name === 'longitude') {
     setPredictionForm(prev => ({
       ...prev,
@@ -330,7 +304,6 @@ function App() {
   }
 };
 
-  // Test backend connection
   const testBackendConnection = async () => {
     try {
       const response = await fetch(`${API_BASE_URL}/risk-predictions`);
@@ -341,7 +314,6 @@ function App() {
     }
   };
 
-  // Check if Google Maps API key is available
   if (!GOOGLE_MAPS_API_KEY) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center p-4">
@@ -362,7 +334,6 @@ function App() {
     );
   }
 
-  // Loading state
   if (loading) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center">
@@ -380,10 +351,29 @@ function App() {
     );
   }
 
+  if (loadError) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50 flex items-center justify-center p-4">
+        <div className="text-center p-8 bg-white rounded-lg shadow-lg max-w-md">
+          <div className="text-red-500 text-5xl mb-4">⚠️</div>
+          <h1 className="text-2xl font-bold text-gray-800 mb-2">Failed to Load Google Maps</h1>
+          <p className="text-gray-600 mb-4">
+            {loadError.message || 'Unable to load Google Maps. Please check your API key and internet connection.'}
+          </p>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-purple-50">
       <div className="container mx-auto p-4 md:p-6 max-w-6xl">
-        {/* Header */}
         <header className="text-center mb-6 md:mb-8">
           <div className="flex items-center justify-center gap-3 mb-3 md:mb-4">
             <div className="bg-blue-500 p-2 md:p-3 rounded-full">
@@ -405,7 +395,6 @@ function App() {
           <p className="text-gray-600 text-sm md:text-lg">AI-Powered Traffic Risk Prediction System</p>
         </header>
 
-        {/* Error message if backend is down */}
         {error && (
           <div className="mb-4 md:mb-6 p-3 md:p-4 bg-yellow-50 border border-yellow-200 rounded-lg">
             <div className="flex items-center justify-between">
@@ -423,7 +412,6 @@ function App() {
           </div>
         )}
 
-        {/* Tab Navigation */}
         <div className="mb-6 md:mb-8 flex justify-center">
           <div className="inline-flex h-10 items-center justify-center rounded-lg bg-gray-100 p-1 text-gray-500">
             <button
@@ -447,7 +435,6 @@ function App() {
           </div>
         </div>
 
-        {/* Map View */}
         {activeTab === 'map' && (
           <div className="bg-white border border-gray-200 shadow-md rounded-lg overflow-hidden">
             <div className="p-4 md:p-6">
@@ -458,7 +445,6 @@ function App() {
                 </div>
               </div>
 
-              {/* Legend */}
               <div className="flex flex-wrap gap-3 md:gap-4 mb-4">
                 <div className="flex items-center gap-2">
                   <div className="w-3 h-3 md:w-4 md:h-4 bg-red-500 rounded-full"></div>
@@ -474,115 +460,88 @@ function App() {
                 </div>
               </div>
 
-              {/* Google Map */}
-              {mapError ? (
+              {!isLoaded ? (
                 <div className="h-80 md:h-96 bg-gray-100 rounded-lg flex items-center justify-center border-2 border-dashed border-gray-300">
-                  <div className="text-center p-4">
-                    <div className="text-red-500 text-3xl md:text-4xl mb-2">⚠️</div>
-                    <p className="text-gray-700">{mapError}</p>
-                    <button
-                      onClick={() => window.location.reload()}
-                      className="mt-4 px-4 py-2 bg-blue-500 text-white rounded hover:bg-blue-600"
-                    >
-                      Retry
-                    </button>
+                  <div className="text-center">
+                    <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
+                    <p className="mt-2 text-gray-600">Loading Google Maps...</p>
                   </div>
                 </div>
               ) : (
-                <LoadScript
-                  googleMapsApiKey={GOOGLE_MAPS_API_KEY}
-                  onLoad={handleGoogleMapsLoad}
-                  onError={handleGoogleMapsError}
+                <GoogleMap
+                  mapContainerStyle={mapContainerStyle}
+                  zoom={12}
+                  center={userLocation}
+                  options={{
+                    disableDefaultUI: false,
+                    zoomControl: true,
+                    streetViewControl: true,
+                    mapTypeControl: true,
+                    fullscreenControl: true
+                  }}
+                  onLoad={(map) => {
+                    mapRef.current = map;
+                    setTimeout(() => {
+                      console.log('Map is now ready for markers');
+                      setMapReady(true);
+                    }, 100);
+                  }}
+                  onClick={onMapClick}
                 >
-                  {isGoogleMapsLoaded ? (
-                    <GoogleMap
-                      mapContainerStyle={mapContainerStyle}
-                      zoom={12}
-                      center={userLocation}
-                      options={{
-                        disableDefaultUI: false,
-                        zoomControl: true,
-                        streetViewControl: true,
-                        mapTypeControl: true,
-                        fullscreenControl: true
-                      }}
-                      onLoad={(map) => {
-                      mapRef.current = map;
-                      // Small delay to ensure map is fully initialized
-                      setTimeout(() => {
-                        console.log('Map is now ready for markers');
-                        setMapReady(true);
-                      }, 100);
-                    }}
-                      onClick={onMapClick}
-                    >
-                      {/* Risk area markers */}
-                      {mapReady && riskAreas.map(area => (
-                      <Marker
-                        key={area.id}
-                        position={{ lat: area.latitude, lng: area.longitude }}
-                        icon={getMarkerIcon(area.riskLevel)}
-                        onClick={() => setSelectedArea(area)}
-                      />
-                         ))}
+                  {mapReady && riskAreas.map(area => (
+                    <Marker
+                      key={area.id}
+                      position={{ lat: area.latitude, lng: area.longitude }}
+                      icon={getMarkerIcon(area.riskLevel)}
+                      onClick={() => setSelectedArea(area)}
+                    />
+                  ))}
 
-                      {/* Selected area info window */}
-                      {selectedArea && (
-                        <InfoWindow
-                          position={{ lat: selectedArea.latitude, lng: selectedArea.longitude }}
-                          onCloseClick={() => setSelectedArea(null)}
-                        >
-                          <div className="p-2 max-w-xs">
-                            <h3 className="font-bold text-lg">{selectedArea.name}</h3>
-                            <div className={`px-2 py-1 rounded inline-block mt-1 ${
-                              selectedArea.riskLevel === 'high' ? 'bg-red-100 text-red-800' :
-                              selectedArea.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' :
-                              'bg-green-100 text-green-800'
-                            }`}>
-                              {selectedArea.riskLevel.toUpperCase()} RISK
-                            </div>
-                            <p className="mt-2 text-gray-600">{selectedArea.description}</p>
-                            <p className="mt-1"><strong>Risk Score:</strong> {selectedArea.riskScore?.toFixed(2) || 'N/A'}</p>
-                            <p><strong>Incidents:</strong> {selectedArea.incidents}</p>
-                            <div className="mt-2 text-sm">
-                              <p><strong>Conditions:</strong></p>
-                              <p>Light: {selectedArea.features?.lightLevel || 'N/A'}</p>
-                              <p>Weather: {selectedArea.features?.weather || 'N/A'}</p>
-                              <p>Road: {selectedArea.features?.roadCondition || 'N/A'}</p>
-                            </div>
-                          </div>
-                        </InfoWindow>
-                      )}
-                    </GoogleMap>
-                  ) : (
-                    <div className="h-80 md:h-96 bg-gray-100 rounded-lg flex items-center justify-center">
-                      <div className="text-center">
-                        <div className="inline-block animate-spin rounded-full h-8 w-8 border-t-2 border-b-2 border-blue-500"></div>
-                        <p className="mt-2 text-gray-600">Loading Google Maps...</p>
+                  {selectedArea && (
+                    <InfoWindow
+                      position={{ lat: selectedArea.latitude, lng: selectedArea.longitude }}
+                      onCloseClick={() => setSelectedArea(null)}
+                    >
+                      <div className="p-2 max-w-xs">
+                        <h3 className="font-bold text-lg">{selectedArea.name}</h3>
+                        <div className={`px-2 py-1 rounded inline-block mt-1 ${
+                          selectedArea.riskLevel === 'high' ? 'bg-red-100 text-red-800' :
+                          selectedArea.riskLevel === 'medium' ? 'bg-yellow-100 text-yellow-800' :
+                          'bg-green-100 text-green-800'
+                        }`}>
+                          {selectedArea.riskLevel.toUpperCase()} RISK
+                        </div>
+                        <p className="mt-2 text-gray-600">{selectedArea.description}</p>
+                        <p className="mt-1"><strong>Risk Score:</strong> {selectedArea.riskScore?.toFixed(2) || 'N/A'}</p>
+                        <p><strong>Incidents:</strong> {selectedArea.incidents}</p>
+                        <div className="mt-2 text-sm">
+                          <p><strong>Conditions:</strong></p>
+                          <p>Light: {selectedArea.features?.lightLevel || 'N/A'}</p>
+                          <p>Weather: {selectedArea.features?.weather || 'N/A'}</p>
+                          <p>Road: {selectedArea.features?.roadCondition || 'N/A'}</p>
+                        </div>
                       </div>
-                    </div>
+                    </InfoWindow>
                   )}
-                </LoadScript>
+                </GoogleMap>
               )}
 
               <div className="mt-3 md:mt-4 text-center text-xs md:text-sm text-gray-500">
-              {mapReady ? (
-                <>Click on markers for details • {riskAreas.length} areas monitored</>
-              ) : (
-                <>Loading map markers...</>
-              )}
-              {error && <span className="text-yellow-600 ml-1"> (Using fallback data)</span>}
-            </div>
+                {isLoaded ? (
+                  <>Click on markers for details • {riskAreas.length} areas monitored</>
+                ) : (
+                  <>Loading map markers...</>
+                )}
+                {error && <span className="text-yellow-600 ml-1"> (Using fallback data)</span>}
+              </div>
             </div>
           </div>
         )}
 
-        {/* Prediction Tab */}
         {activeTab === 'predict' && (
           <div className="bg-white border border-gray-200 shadow-md rounded-lg overflow-hidden">
             <div className="p-4 md:p-6">
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-                {/* Left Column: Prediction Form */}
                 <div>
                   <h2 className="text-gray-800 text-lg md:text-xl font-semibold mb-3 md:mb-4">AI Risk Predictor</h2>
                   <p className="text-gray-600 mb-4 md:mb-6 text-sm md:text-base">Enter conditions to get AI-powered risk prediction for any location</p>
@@ -709,7 +668,6 @@ function App() {
                     </div>
                   </form>
 
-                  {/* Quick Location Buttons */}
                   <div className="mt-4 md:mt-6">
                     <p className="text-sm text-gray-600 mb-2">Quick locations:</p>
                     <div className="flex gap-2">
@@ -754,7 +712,6 @@ function App() {
                   </div>
                 </div>
 
-                {/* Right Column: Prediction Result */}
                 <div>
                   <h3 className="text-gray-800 text-lg font-semibold mb-3 md:mb-4">Prediction Results</h3>
 
@@ -883,7 +840,6 @@ function App() {
           </div>
         )}
 
-        {/* List View */}
         {activeTab === 'list' && (
           <div className="bg-white border border-gray-200 shadow-md rounded-lg">
             <div className="p-4 md:p-6">
@@ -924,7 +880,6 @@ function App() {
                 }
               </div>
 
-              {/* Summary */}
               <div className="mt-4 md:mt-6 p-3 md:p-4 bg-blue-50 rounded-lg border border-blue-200">
                 <div className="text-center text-gray-700">
                   <p className="font-medium text-sm md:text-base">Summary</p>
@@ -943,7 +898,6 @@ function App() {
           </div>
         )}
 
-        {/* Backend Status Card */}
         <div className="mt-6 md:mt-8">
           <div className="bg-white rounded-lg border border-gray-200 p-4 md:p-6 shadow-sm">
             <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-3 md:gap-0">
